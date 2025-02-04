@@ -1,0 +1,16 @@
+sounddevice 
+numpy 
+loguru 
+pywin32 
+pypiwin32 
+boto3 
+python-dotenv
+anthropic
+openai
+openai-whisper 
+torch 
+torchaudio
+librosa
+PyQt6 
+qasync
+keyboard
