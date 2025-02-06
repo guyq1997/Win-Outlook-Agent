@@ -8,7 +8,6 @@ from typing import Dict, Optional
 import asyncio
 from loguru import logger
 
-from llm_api import query_llm
 
 class EmailParser:
     def __init__(self, model: str = "gpt-4o"):
@@ -57,32 +56,6 @@ class EmailParser:
 
     async def _call_llm(self, text: str) -> Dict:
         """Call LLM with function calling for email parsing."""
-        try:
-            # Prepare the prompt with the voice command
-            prompt = f"Parse this voice command into email components: {text}"
-            
-            # Call LLM with function schema
-            response = query_llm(
-                prompt=self._system_prompt + "\n\n" + prompt,
-                provider="openai",
-                model=self.model,
-            )
-            
-            # Add debug logging for raw response
-            logger.debug(f"Raw LLM response: {response}")
-            
-            try:
-                parsed_response = json.loads(response)
-                logger.debug(f"Successfully parsed JSON: {json.dumps(parsed_response, indent=2)}")
-                return parsed_response
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing failed. Response content: {response}")
-                logger.error(f"JSON error details: {str(e)}")
-                raise ValueError(f"Invalid JSON response from LLM: {str(e)}")
-                
-        except Exception as e:
-            logger.error(f"LLM call failed: {str(e)}")
-            raise
 
     def _validate_response(self, data: Dict) -> Dict:
         """

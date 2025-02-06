@@ -8,68 +8,58 @@ from qasync import QEventLoop, asyncSlot
 from voice_email_workflow import VoiceEmailWorkflow
 from loguru import logger
 import keyboard  # 新增导入
+import random
 
 class VoiceEmailUI(QMainWindow):
     def __init__(self):
         super().__init__()
         logger.debug("Initializing VoiceEmailUI")
-        self.workflow = VoiceEmailWorkflow(
-            whisper_model="base",
-            transcript_callback=self.handle_transcript
-        )
+        self.workflow = VoiceEmailWorkflow()
         self.recording = False
         self.initUI()
         # Set window flags to remove from taskbar and make it tool window
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.update_button_style()  # Initialize button style
         logger.debug("VoiceEmailUI initialization completed")
 
     def initUI(self):
         self.setWindowTitle('语音邮件助手')
-        self.setGeometry(100, 100, 200, 200)  # 缩小窗口尺寸
+        self.setGeometry(100, 100, 120, 150)  # Even smaller window size
         
-        # 创建中心部件和布局
+        # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
-        # 录音按钮 - 使用自定义样式
+        # Record button - using custom style
         self.record_button = QPushButton()
-        self.record_button.setFixedSize(100, 100)  # 设置固定大小
-        self.record_button.setStyleSheet("""
+        self.record_button.setFixedSize(80, 80)  # Smaller button
+        self.record_button.clicked.connect(self.toggle_recording)
+        layout.addWidget(self.record_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # Close button
+        self.close_button = QPushButton("×")  # Using × symbol for close
+        self.close_button.setFixedSize(20, 20)
+        self.close_button.clicked.connect(self.closeEvent)  # Changed from hide() to trigger_close()
+        self.close_button.setStyleSheet("""
             QPushButton {
                 background-color: #FF4444;
-                border-radius: 50px;
+                color: white;
+                border-radius: 10px;
                 border: none;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #FF6666;
             }
-            QPushButton:pressed {
-                background-color: #CC3333;
-            }
         """)
-        self.record_button.clicked.connect(self.toggle_recording)
-        layout.addWidget(self.record_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.close_button, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        # 状态标签
-        self.status_label = QLabel('准备就绪')
-        layout.addWidget(self.status_label)
-        
-        # 音量进度条
-        self.volume_bar = QProgressBar()
-        self.volume_bar.setRange(0, 100)
-        layout.addWidget(self.volume_bar)
-        
-        # 文本显示区域
-        self.text_display = QTextEdit()
-        self.text_display.setReadOnly(True)
-        layout.addWidget(self.text_display)
-        
-        # 初始化定时器用于更新UI
+        # Initialize timer for UI updates
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_ui)
-        self.timer.start(100)  # 每100ms更新一次
-        
+        self.timer.start(100)
+
     def update_button_style(self):
         """更新按钮样式"""
         if self.recording:
@@ -92,7 +82,7 @@ class VoiceEmailUI(QMainWindow):
             self.record_button.setStyleSheet("""
                 QPushButton {
                     background-color: #FF4444;
-                    border-radius: 50px;
+                    border-radius: 40px;
                     border: none;
                 }
                 QPushButton:hover {
@@ -104,56 +94,60 @@ class VoiceEmailUI(QMainWindow):
             """)
 
     def update_ui(self):
-        """更新UI显示"""
-        if self.recording:
-            # 更新录音状态显示
-            dots = '.' * (int(self.timer.interval() / 500) % 4)
-            self.status_label.setText(f'正在录音{dots}')
-    
+        """Update UI display"""
+        if random.random() < 0.001:  # Only log 0.1% of the updates
+            loop = asyncio.get_event_loop()
+            logger.debug(f"Event loop status: running={loop.is_running()}, closed={loop.is_closed()}")
+
     def volume_callback(self, level: float):
         """音量回调，更新进度条"""
         # 将音量级别转换为0-100的范围
         volume_level = min(100, int(level * 100))
         self.volume_bar.setValue(volume_level)
     
-    def closeEvent(self, event):
-        """Override close event to minimize instead of close"""
-        event.ignore()
+    def closeEvent(self, event=None):
+        """Override close event to stop recording and cleanup"""
+        if event:  # If called from window close
+            event.ignore()
+        if self.recording:
+            asyncio.create_task(self.stop_recording())
         self.hide()
 
     @asyncSlot()
     async def toggle_recording(self):
-        """切换录音状态"""
-        if not self.recording:
-            # 开始录音
-            self.recording = True
-            self.update_button_style()
-            self.text_display.clear()
-            self.status_label.setText('正在录音...')
-            try:
-                await self.workflow.start_recording()
-            except Exception as e:
-                logger.error(f'录音启动失败: {str(e)}')
+        """Toggle recording state"""
+        try:
+            if not self.recording:
+                logger.debug("Starting recording process...")
+                # Ensure clean state before starting
+                await self.workflow.initialize_services()
+                
+
+                self.recording = True
+                self.update_button_style()
+                await self.workflow.start_recording(volume_callback=self.volume_callback)
+                logger.debug("Recording started successfully")
+            else:
+                logger.debug("Stopping recording process...")
                 self.recording = False
                 self.update_button_style()
-                self.status_label.setText('准备就绪')
-                return
-        else:
-            # 停止录音并处理
+                try:
+                    await asyncio.wait_for(
+                        self.workflow.stop_and_process(),
+                        timeout=35.0
+                    )
+                    logger.debug("stop_and_process completed successfully")
+                except (asyncio.CancelledError, TimeoutError, ValueError, Exception) as e:
+                    logger.error(f"Processing failed: {str(e)}", exc_info=True)
+                finally:
+                    logger.debug("Resetting UI state...")
+                    await self.workflow.cleanup()  # Ensure cleanup after processing
+                    self.hide()
+        except Exception as e:
+            logger.error(f"Recording operation failed: {str(e)}", exc_info=True)
+
             self.recording = False
             self.update_button_style()
-            self.status_label.setText('正在处理...')
-            try:
-                await self.workflow.stop_and_process()
-            except Exception as e:
-                logger.error(f"处理失败: {str(e)}")
-            finally:
-                self.status_label.setText('准备就绪')
-                self.hide()  # Hide the window after stopping recording
-    
-    async def cleanup(self):
-        """清理资源"""
-        await self.workflow.full_cleanup()
 
     def handle_transcript(self, text: str):
         """处理转录文本，创建Outlook草稿"""
@@ -171,11 +165,13 @@ class VoiceEmailUI(QMainWindow):
     def show_window(self):
         """确保窗口正确显示的方法"""
         logger.debug("Showing window...")
-        # 使用 QTimer 延迟显示窗口
+        self.update_button_style()  # Ensure correct button style when showing window
         QTimer.singleShot(100, self._do_show)
     
     def _do_show(self):
         """实际执行显示窗口的操作"""
+        # Set window to stay on top
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.show()
         logger.debug("Window shown, forcing repaint...")
         self.repaint()
@@ -183,9 +179,10 @@ class VoiceEmailUI(QMainWindow):
         # 确保所有子部件都更新
         for widget in self.findChildren(QWidget):
             widget.repaint()
-        self.raise_()
-        self.activateWindow()
-        logger.debug("Window activated")
+        self.raise_()  # Brings window to front
+        self.activateWindow()  # Activates the window
+        self.setFocus()  # Gives focus to the window
+        logger.debug("Window activated and brought to front")
 
     async def initialize(self):
         """异步初始化所有服务"""
@@ -194,6 +191,15 @@ class VoiceEmailUI(QMainWindow):
             logger.info("All services initialized successfully")
         except Exception as e:
             logger.error(f"初始化失败: {str(e)}")
+
+    async def stop_recording(self):
+        """Stop recording and cleanup"""
+        try:
+            self.recording = False
+            self.update_button_style()
+            await self.workflow.stop_and_process()
+        except Exception as e:
+            logger.error(f"Error stopping recording: {str(e)}")
 
 def main():
     app = QApplication(sys.argv)
