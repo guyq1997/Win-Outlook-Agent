@@ -10,12 +10,15 @@ from loguru import logger
 import keyboard  # 新增导入
 import random
 
+
 class VoiceEmailUI(QMainWindow):
     def __init__(self):
         super().__init__()
         logger.debug("Initializing VoiceEmailUI")
         self.workflow = VoiceEmailWorkflow()
         self.recording = False
+        self.dragging = False
+        self.offset = None
         self.initUI()
         # Set window flags to remove from taskbar and make it tool window
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
@@ -107,11 +110,44 @@ class VoiceEmailUI(QMainWindow):
     
     def closeEvent(self, event=None):
         """Override close event to stop recording and cleanup"""
-        if event:  # If called from window close
-            event.ignore()
-        if self.recording:
-            asyncio.create_task(self.stop_recording())
-        self.hide()
+        try:
+            if event:  # If called from window close
+                event.ignore()
+            
+            # Create cleanup task
+            cleanup_task = asyncio.create_task(self._cleanup_and_hide())
+            
+            def cleanup_done(task):
+                try:
+                    task.result()
+                except Exception as e:
+                    logger.error(f"Cleanup failed: {str(e)}")
+                finally:
+                    self.hide()
+            
+            cleanup_task.add_done_callback(cleanup_done)
+                
+        except Exception as e:
+            logger.error(f"Error during close event: {str(e)}")
+            self.hide()
+
+    async def _cleanup_and_hide(self):
+        """Helper method to handle cleanup when closing"""
+        try:
+            if self.recording:
+                self.recording = False
+                self.update_button_style()
+                # Cancel any ongoing recording tasks
+                if hasattr(self.workflow, '_stream_task'):
+                    self.workflow._stream_task.cancel()
+                # Stop the audio service
+                self.workflow.audio_service.stop_recording()
+                # Cleanup all services
+                await self.workflow.cleanup()
+            logger.debug("Cleanup completed successfully")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
+            raise
 
     @asyncSlot()
     async def toggle_recording(self):
@@ -131,19 +167,22 @@ class VoiceEmailUI(QMainWindow):
                 logger.debug("Stopping recording process...")
                 self.recording = False
                 self.update_button_style()
+                self.hide()
                 try:
                     await asyncio.wait_for(
                         self.workflow.stop_and_process(),
                         timeout=35.0
                     )
                     logger.debug("stop_and_process completed successfully")
+                    
+                    logger.debug("UI hidden")
                 except (asyncio.CancelledError, TimeoutError, ValueError, Exception) as e:
                     logger.error(f"Processing failed: {str(e)}", exc_info=True)
                 finally:
-                    logger.debug("Resetting UI state...")
+                    logger.debug("cleaning up...")
                     await self.workflow.cleanup()  # Ensure cleanup after processing
-                    self.hide()
         except Exception as e:
+
             logger.error(f"Recording operation failed: {str(e)}", exc_info=True)
 
             self.recording = False
@@ -201,6 +240,22 @@ class VoiceEmailUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error stopping recording: {str(e)}")
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self.offset = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.dragging and self.offset:
+            self.move(event.globalPosition().toPoint() - self.offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.dragging = False
+        self.offset = None
+        super().mouseReleaseEvent(event)
+
 def main():
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
@@ -211,23 +266,49 @@ def main():
     
     # 在事件循环中初始化
     async def init():
-        await window.initialize()
+        try:
+            await window.initialize()
+            logger.info("Application initialized successfully")
+        except Exception as e:
+            logger.error(f"Initialization failed: {str(e)}")
+            sys.exit(1)
     
     # 注册全局热键
     keyboard.add_hotkey('ctrl+alt+m', window.show_window)
     
     # 退出处理
     async def shutdown():
-        await window.cleanup()
-        app.quit()
+        try:
+            logger.info("Starting application shutdown...")
+            if window.recording:
+                await window.stop_recording()
+            await window.workflow.cleanup()
+            await window.cleanup()
+            app.quit()
+            logger.info("Application shutdown completed")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
+            app.quit()
     
     # 注册退出热键
     keyboard.add_hotkey('ctrl+alt+q', lambda: asyncio.create_task(shutdown()))
     
     # 运行初始化和事件循环
-    with loop:
-        loop.run_until_complete(init())
-        loop.run_forever()
+    try:
+        with loop:
+            loop.run_until_complete(init())
+            # 设置应用程序退出时的清理
+            app.aboutToQuit.connect(lambda: asyncio.create_task(shutdown()))
+            loop.run_forever()
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        raise
+    finally:
+        loop.close()
 
 if __name__ == '__main__':
-    main() 
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Failed to start application: {str(e)}")
+        input("Press Enter to exit...")  # 让用户看到错误信息

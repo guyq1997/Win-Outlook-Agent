@@ -14,3 +14,5 @@ librosa
 PyQt6 
 qasync
 keyboard
+websockets
+pyinstaller

@@ -111,8 +111,10 @@ class AudioRecordingService:
     def cleanup(self) -> None:
         """Clean up resources and stop recording if active."""
         try:
+            self.audio_data = []
             if self.recording:
                 self.stop_recording()
+
 
             if self.stream:
                 try:
@@ -220,7 +222,6 @@ class AudioRecordingService:
             # 合并所有音频块
             full_audio = np.concatenate([np.frombuffer(chunk, dtype=np.int16) for chunk in self.audio_data])
             
-            # 清空队列
             while not self.audio_queue.empty():
                 try:
                     self.audio_queue.get_nowait()
@@ -236,6 +237,7 @@ class AudioRecordingService:
         except Exception as e:
             logger.error(f"Error stopping recording: {e}")
             self.recording = False
+            self.audio_data = []  # 确保在发生错误时也清空数据
             raise
 
     async def get_audio_chunk(self) -> Optional[bytes]:

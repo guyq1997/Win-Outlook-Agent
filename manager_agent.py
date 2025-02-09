@@ -12,12 +12,17 @@ import asyncio
 from prompt import PROMPTS
 from openai import OpenAI
 import os
+from email_service.outlook_agent import run_outlook_agent
+from display_window.display_window import display_content
 
-class EmailDraftAgent:
+
+
+class ManagerAgent:
     def __init__(self):
         """Initialize the agent with OpenAI API key."""
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.outlook_service = OutlookService()
+
 
 
     async def run(self, user_input: str) -> str:
@@ -26,27 +31,39 @@ class EmailDraftAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "create_draft",
-                    "description": "Create and display a draft email in Outlook",
+                    "name": "display_content",
+                    "description": "Display content to the user",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "to": {"type": "string", "description": "Recipient email addresses, separated by commas"},
-                            "subject": {"type": "string", "description": "Email subject"},
-                            "body": {"type": "string", "description": "Email body content"},
-                            "priority": {"type": "string", "enum": ["normal", "high"], "description": "Email priority"},
-
-                            "attachments": {"type": "array", "items": {"type": "string"}, "description": "List of attachment paths"}
+                            "content": {"type": "string", "description": "Content to display"},
                         },
-                        "required": ["subject", "body"]
+                        "required": ["content"]
+                    }
+
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_outlook_agent",
+                    "description": "Invoke the outlook agent to create a draft email for user.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_input": {"type": "string", "description": "User input"},
+                        },
+                        "required": ["user_input"]
                     }
                 }
             }
         ]
 
+
+
         messages = [
-            {"role": "system", "content": PROMPTS['email_draft']},
-            {"role": "user", "content": "Below is the user input:\n\n " + user_input}
+            {"role": "system", "content": PROMPTS['allocate_task']},
+            {"role": "user", "content": user_input}
         ]
 
 
@@ -58,7 +75,6 @@ class EmailDraftAgent:
                 tools=tools,
                 tool_choice="required" # call one or more tools
             )
-
 
             message = response.choices[0].message
 
@@ -82,10 +98,6 @@ class EmailDraftAgent:
 
             raise RuntimeError(f"Agent execution failed: {str(e)}")
 
-    async def cleanup(self):
-        """Cleanup Outlook service resources."""
-        await self.outlook_service.cleanup()
-
     async def call_function(self, name, args):
         """Call a function by name with the given arguments.
         
@@ -106,9 +118,11 @@ class EmailDraftAgent:
         try:
             # Map function names to their implementations
             function_map = {
-                "create_draft": self.outlook_service.create_draft
+                "display_content": display_content,
+                "run_outlook_agent": run_outlook_agent
             }
             
+
 
             if name not in function_map:
                 return f"Error: Unknown function {name}"
@@ -127,3 +141,4 @@ class EmailDraftAgent:
             return f"Error: Invalid arguments for {name} - {str(e)}"
         except Exception as e:
             return f"Error: Function {name} failed - {str(e)}" 
+

@@ -1,19 +1,16 @@
 from typing import Optional, Callable
-import numpy as np
 from loguru import logger
 import asyncio
-from audio_service import AudioRecordingService
-from email_service.email_parser import EmailParser
-from email_service.outlook_service import OutlookService
+from audio_service.audio_service import AudioRecordingService
 from openai_realtime_client import OpenAIRealtimeAudioTextClient
 from prompt import PROMPTS
-from llm_agent import EmailDraftAgent
+from manager_agent import ManagerAgent
+
 
 class VoiceEmailWorkflow:
     def __init__(self):
         self.transcript = ""	
         self.audio_service = AudioRecordingService()
-        self.outlook_service = OutlookService()
         self.is_processing = False
         self.is_shutting_down = False
         self.openai_client = OpenAIRealtimeAudioTextClient()
@@ -171,6 +168,8 @@ class VoiceEmailWorkflow:
                     
                     self.transcript = self.openai_client.concatenated_text_buffer
                     logger.success(f"Processing completed, transcript length: {len(self.transcript)}")
+                    # 清理音频数据
+                    self._current_audio_data = None
                     break  # 成功获取到文本，跳出重试循环
                     
                 except asyncio.TimeoutError:
@@ -187,32 +186,51 @@ class VoiceEmailWorkflow:
             logger.error(f"Workflow failed with error type {type(e)}: {str(e)}", exc_info=True)
             raise
         finally:
-            email_draft = EmailDraftAgent()
-            await email_draft.run(user_input=self.transcript)
+            manager_agent = ManagerAgent()
+            await manager_agent.run(user_input=self.transcript)
             self.is_processing = False
-            logger.debug("Disconnecting from OpenAI...")
             try:
-
-
                 if hasattr(self, 'openai_client') and self.openai_client.ws:
                     disconnect_task = asyncio.create_task(self.openai_client.disconnect())
                     await asyncio.wait_for(disconnect_task, timeout=5.0)
                     logger.debug("Disconnected from OpenAI")
             except Exception as e:
                 logger.error(f"Error during disconnect: {str(e)}", exc_info=True)
+            logger.debug("Transcript reset in stop_and_process")
 
     async def cleanup(self):
         """清理资源"""
         try:
-            await self.openai_client.disconnect()
-            await self.outlook_service.cleanup()
-            if self.audio_service:
-                self.audio_service.cleanup()
+            logger.debug("Starting cleanup process...")
+            
+            # First cleanup OpenAI client
+            if hasattr(self, 'openai_client'):
+                logger.debug("Cleaning up OpenAI client...")
+                try:
+                    if self.openai_client.ws:
+                        await self.openai_client.disconnect()
+                    self.openai_client.cleanup()
+                except Exception as e:
+                    logger.error(f"OpenAI cleanup error: {str(e)}")
+            
+            # Finally cleanup audio service
+            if hasattr(self, 'audio_service'):
+                logger.debug("Cleaning up audio service...")
+                try:
+                    # Audio service cleanup is synchronous
+                    self.audio_service.cleanup()
+                except Exception as e:
+                    logger.error(f"Audio service cleanup error: {str(e)}")
+
             # Reset internal state
             self.transcript = ""
             self.is_processing = False
             self._current_audio_data = None
             if hasattr(self, '_stream_task'):
                 delattr(self, '_stream_task')
+            
+            logger.debug("Cleanup completed successfully")
         except Exception as e:
             logger.error(f"Cleanup failed: {str(e)}")
+            # Don't raise the exception to avoid crashing the application
+            # Just log it and continue

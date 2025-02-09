@@ -5,6 +5,7 @@ import websockets
 from typing import Optional, Dict, Callable, Any
 import base64
 import asyncio
+from dotenv import load_dotenv
 
 
 class OpenAIRealtimeAudioTextClient:
@@ -12,6 +13,7 @@ class OpenAIRealtimeAudioTextClient:
     A client for the OpenAI realtime API.
     """
     def __init__(self,  model: str = "gpt-4o-realtime-preview"):
+        load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.model = model
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -126,6 +128,7 @@ class OpenAIRealtimeAudioTextClient:
         }))
 
     async def connect(self):
+
         """Establish asynchronous WebSocket connection"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -167,7 +170,7 @@ class OpenAIRealtimeAudioTextClient:
                     "type": "input_audio_buffer.append",
                     "audio": base64.b64encode(audio_data).decode('utf-8')
                 }))
-                logger.debug(f"Sent audio chunk of size: {len(audio_data)}")
+                # logger.debug(f"Sent audio chunk of size: {len(audio_data)}")
             else:
                 raise RuntimeError("Failed to establish WebSocket connection")
         except Exception as e:
@@ -272,3 +275,27 @@ class OpenAIRealtimeAudioTextClient:
         self.concatenated_text_buffer += content
         logger.debug(f"Received text done: {content}")
         await self.response_done_handler()
+
+    def cleanup(self):
+        """Cleanup resources"""
+        try:
+            logger.debug("Starting OpenAI client cleanup...")
+            
+            # Cancel ongoing receive task if exists
+            if self.receive_task and not self.receive_task.done():
+                self.receive_task.cancel()
+                
+            # Clear event and reset flags
+            if hasattr(self, 'response_event'):
+                self.response_event.clear()
+            self.response_finished = False
+            
+            # Clear buffers and reset state
+            self.concatenated_text_buffer = ""
+            self.session_id = None
+            
+            logger.debug("OpenAI client cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during OpenAI client cleanup: {str(e)}")
+            # Don't raise the exception to avoid crashing the application
+
