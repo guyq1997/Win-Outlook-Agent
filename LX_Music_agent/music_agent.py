@@ -14,18 +14,14 @@ from openai import OpenAI
 import os
 from email_service.outlook_agent import run_outlook_agent
 from display_window.display_window import display_content
-from LX_Music_agent.music_agent import MusicAgent
+from .lx_music_controller import LXMusicController
 
 
-
-
-class ManagerAgent:
+class MusicAgent:
     def __init__(self):
         """Initialize the agent with OpenAI API key."""
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.outlook_service = OutlookService()
-
-
+        self.music_controller = LXMusicController()
 
     async def run(self, user_input: str) -> str:
         """Run the agent with user input and return response."""
@@ -33,43 +29,65 @@ class ManagerAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "display_content",
-                    "description": "Display content to the user",
+                    "name": "play",
+                    "description": "Play music",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "content": {"type": "string", "description": "Content to display"},
-                        },
-                        "required": ["content"]
-                    }
-
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "run_outlook_agent",
-                    "description": "Invoke the outlook agent to create a draft email for user.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_input": {"type": "string", "description": "User input"},
-                        },
-                        "required": ["user_input"]
+                        "properties": {}
                     }
                 }
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "run_music_agent",
-                    "description": "Invoke the music agent to pause, play, next track, previous track, search and play music.",
+                    "name": "pause",
+                    "description": "Pause music",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "next_track",
+                    "description": "Play next track",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "previous_track",
+                    "description": "Play previous track",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_and_play",
+                    "description": "Search and play music",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "user_input": {"type": "string", "description": "User input for music control"}
+                            "song_name": {
+                                "type": "string",
+                                "description": "Name of the song for example: '消愁'"
+                            },
+                            "singer_name": {
+                                "type": "string",
+                                "description": "Name of the singer for example: '毛不易'"
+                            }
                         },
-                        "required": ["user_input"]
+                        "required": ["song_name"]
                     }
                 }
             }
@@ -77,8 +95,9 @@ class ManagerAgent:
 
 
 
+
         messages = [
-            {"role": "system", "content": PROMPTS['allocate_task']},
+            {"role": "system", "content": "You are a music agent, you can play, pause, next track, previous track, search and play music."},
             {"role": "user", "content": user_input}
         ]
 
@@ -86,11 +105,12 @@ class ManagerAgent:
         try:
             client = OpenAI()
             response =  client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=messages,
                 tools=tools,
                 tool_choice="required" # call one or more tools
             )
+
 
             message = response.choices[0].message
 
@@ -134,9 +154,11 @@ class ManagerAgent:
         try:
             # Map function names to their implementations
             function_map = {
-                "display_content": display_content,
-                "run_outlook_agent": run_outlook_agent,
-                "run_music_agent": MusicAgent().run
+                "play": self.music_controller.play,
+                "pause": self.music_controller.pause,
+                "next_track": self.music_controller.next_track,
+                "previous_track": self.music_controller.previous_track,
+                "search_and_play": self.music_controller.search_and_play
             }
             
 

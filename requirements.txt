@@ -16,3 +16,4 @@ qasync
 keyboard
 websockets
 pyinstaller
+psutil
