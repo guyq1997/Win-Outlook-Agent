@@ -34,20 +34,6 @@ async def run_outlook_agent(user_input: str) -> str:
                     "required": ["subject", "body"]
                 }
             }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "find_most_likely_email",
-                "description": "Find the most likely email address of one recipient from a list of his/her possible names",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "possible_names": {"type": "array", "items": {"type": "string"}, "description": "List of possible contact names"}
-                    },
-                }
-
-            }
         }
     ]
 
@@ -119,8 +105,7 @@ async def call_function(name: str, args: Union[str, dict], outlook_service: Outl
     
     try:
         function_map = {
-            "create_draft": outlook_service.create_draft,
-            "find_most_likely_email": outlook_service.find_most_likely_email
+            "create_draft": outlook_service.create_draft
         }
         
         if name not in function_map:

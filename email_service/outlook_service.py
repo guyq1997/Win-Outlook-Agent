@@ -161,107 +161,46 @@ class OutlookService:
         async with self._lock:
             try:
                 await self.initialize()
+                
+                # Create a temporary mail item to use recipient resolution
+                mail_item = self.outlook.CreateItem(0)  # olMailItem
+                
                 best_match = None
-                best_score = 0
-                best_name = None
-                MIN_MATCH_SCORE = 1
-
-                def get_match_score(contact_name, search_term):
-                    search_term = search_term.lower()
-                    contact_name = contact_name.lower()
-                    
-                    # Split names into parts
-                    search_parts = search_term.split()
-                    contact_parts = contact_name.split()
-                    
-                    # Exact match
-                    if contact_name == search_term:
-                        return 4
-                    
-                    # Check if all search parts are in contact name
-                    if all(part in contact_name for part in search_parts):
-                        return 3
-                    
-                    # Check for first name or last name exact matches
-                    if any(search_part == contact_part 
-                          for search_part in search_parts 
-                          for contact_part in contact_parts):
-                        return 2
-                    
-                    # Partial matches in any part
-                    if any(search_part in contact_part 
-                          for search_part in search_parts 
-                          for contact_part in contact_parts):
-                        return 1
-                    
-                    return 0
-
-                # 1. Search recent emails (more reliable than AutoComplete)
-                logger.debug("Searching recent emails...")
-                recent_contacts = {}
-                try:
-                    sent_items = self.namespace.GetDefaultFolder(5)  # Sent Items folder
-                    for item in sent_items.Items.Restrict("[SentOn] > '" + 
-                            (datetime.now() - timedelta(days=30)).strftime('%m/%d/%Y %H:%M %p') + "'"):
-                        if item.To:
-                            for recipient in item.To.split(';'):
-                                recipient = recipient.strip()
-                                if recipient and '@' in recipient:
-                                    recent_contacts[recipient] = recipient
-                except Exception as e:
-                    logger.warning(f"Failed to search recent emails: {str(e)}")
-
-                # 2. Search contacts folder
-                logger.debug("Searching contacts folder...")
-                contacts = {}
-                try:
-                    contacts_folder = self.namespace.GetDefaultFolder(10)
-                    for contact in contacts_folder.Items:
-                        if contact.Class == 40:  # OlObjectClass.olContact
-                            name = f"{contact.FirstName} {contact.LastName}".strip()
-                            if contact.Email1Address:
-                                contacts[name] = contact.Email1Address
-                except Exception as e:
-                    logger.warning(f"Failed to search contacts folder: {str(e)}")
-
-                # 3. Search Global Address List
-                logger.debug("Searching Global Address List...")
-                try:
-                    for list_name in self.namespace.AddressLists:
-                        if "Global Address List" in list_name.Name:
-                            gal = list_name
-                            for entry in gal.AddressEntries:
-                                try:
-                                    if entry.AddressEntryUserType == 0:
-                                        user = entry.GetExchangeUser()
-                                        if user:
-                                            name = user.Name
-                                            email = user.PrimarySmtpAddress
-                                            for possible in possible_names:
-                                                score = get_match_score(name, possible)
-                                                if score > best_score:
-                                                    best_score = score
-                                                    best_name = possible
-                                                    best_match = email
-                                except Exception as entry_error:
-                                    logger.debug(f"Skipping GAL entry due to error: {str(entry_error)}")
-                            break
-                except Exception as e:
-                    logger.warning(f"Failed to search GAL: {str(e)}")
-
-                # Combine and evaluate all results
-                combined = {**recent_contacts, **contacts}
-                for name, email in combined.items():
-                    for possible in possible_names:
-                        score = get_match_score(name, possible)
-                        if score > best_score:
-                            best_score = score
-                            best_name = possible
-                            best_match = email
-
-                # Return tuple as specified in the docstring
-                return f"The most likely email address of the recipient {possible_names} is: {best_match}" if best_match and best_score >= MIN_MATCH_SCORE else None
-
+                best_match_score = 0
+                
+                for name in possible_names:
+                    try:
+                        # Add recipient to resolve
+                        recipient = mail_item.Recipients.Add(name)
+                        
+                        # Resolve the name against the address book
+                        if recipient.Resolve():
+                            # Calculate match score (exact match gets highest score)
+                            match_score = 0
+                            resolved_name = recipient.Name.lower()
+                            search_name = name.lower()
+                            
+                            if resolved_name == search_name:
+                                match_score = 100
+                            elif search_name in resolved_name:
+                                match_score = 75
+                            elif any(part in resolved_name for part in search_name.split()):
+                                match_score = 50
+                                
+                            # Update best match if this score is higher
+                            if match_score > best_match_score:
+                                email_address = recipient.AddressEntry.GetExchangeUser().PrimarySmtpAddress
+                                best_match = (recipient.Name, email_address)
+                                best_match_score = match_score
+                                
+                    except Exception as e:
+                        logger.debug(f"Failed to resolve '{name}': {str(e)}")
+                        continue
+                
+                # Clean up
+                mail_item = None
+                
+                return "The email address of the recipient is: " + best_match[1] if best_match else "None"
 
             except Exception as e:
                 logger.error(f"Failed to find email: {str(e)}", exc_info=True)

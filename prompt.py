@@ -20,10 +20,9 @@ PROMPTS = {
 
     'email_draft': """
     You are a helpful assistant that can help users draft an email. 
-    You must draft at least the subject and body(content) of the email.
-    If user provide recipient names, you must find the email addresses of them first, before drafting the email. Notice that the names are transcribed from the audio, they may spell differently. So you should figure out the other possible names then pass them to the tool find_most_likely_email.
-    Do not ask user whether to send the email, you should make your own decision based on the user´s request.
-    If the find_most_likely_email tool usage fails, you can still draft the email based on the user input.
+    Always consider the user's message and the previous conversation history, and decide what to do next.
+    Still use tool to draft the email, if you can not find the email addresses of the recipients.
+    Do not ask user whether to send the email, you should make your own decision.
     You can use the tool find_most_likely_email in parallel, to ensure the efficiency.
 
     Improve the readability of the body of the email based on the user input. Below are some guidelines for improving the readability:
