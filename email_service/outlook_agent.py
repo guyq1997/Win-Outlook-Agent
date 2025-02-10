@@ -34,6 +34,20 @@ async def run_outlook_agent(user_input: str) -> str:
                     "required": ["subject", "body"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "find_most_likely_email",
+                "description": "Find the most likely email address of one recipient from a list of his/her possible names",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "possible_names": {"type": "array", "items": {"type": "string"}, "description": "List of possible contact names"}
+                    },
+                }
+
+            }
         }
     ]
 
@@ -52,22 +66,46 @@ async def run_outlook_agent(user_input: str) -> str:
         )
 
         message = response.choices[0].message
-
-        if message.tool_calls:
+        messages.append(message)
+        logger.info(f"Message: {message}")
+        
+        count = 0
+        while count < 3 and message.tool_calls:
             for tool_call in message.tool_calls:
                 try:
+
                     name = tool_call.function.name
                     args = tool_call.function.arguments
+
                     logger.info(f"Calling tool {name} with arguments: {args}")
                     tool_result = await call_function(name, args, outlook_service)
                     logger.info(f"Tool {name} returned: {tool_result}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(tool_result)
+                    })
+
                 except Exception as e:
                     logger.error(f"Error in tool call {name}: {str(e)}")
                     raise
+                
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=tools,
+                tool_choice="auto"
+            )
+
+            message = response.choices[0].message
+            logger.info(f"Message: {message}")
+            messages.append(message)
+            count += 1
 
         return None
 
     except Exception as e:
+
         logger.error(f"Error in agent execution: {str(e)}")
         raise RuntimeError(f"Agent execution failed: {str(e)}")
 
@@ -81,7 +119,8 @@ async def call_function(name: str, args: Union[str, dict], outlook_service: Outl
     
     try:
         function_map = {
-            "create_draft": outlook_service.create_draft
+            "create_draft": outlook_service.create_draft,
+            "find_most_likely_email": outlook_service.find_most_likely_email
         }
         
         if name not in function_map:

@@ -11,6 +11,7 @@ import os
 import time
 import threading
 import subprocess
+from datetime import datetime, timedelta
 
 class OutlookService:
     def __init__(self):
@@ -144,7 +145,8 @@ class OutlookService:
 
     async def find_most_likely_email(self, possible_names: list[str]) -> tuple[str, str]:
         """
-        Find the most likely email address from a list of possible contact names.
+        Find the most likely email address of one recipient from a list of possible names by searching
+        the Global Address List.
         
         Args:
             possible_names: List of possible contact names to search for
@@ -160,64 +162,109 @@ class OutlookService:
             try:
                 await self.initialize()
                 best_match = None
-                best_score = -1
+                best_score = 0
                 best_name = None
-                
-                contacts_folder = self.namespace.GetDefaultFolder(10)  # 10 = olFolderContacts
-                
-                # Build filter for all possible names
-                filter_conditions = []
-                for name in possible_names:
-                    filter_conditions.append(f"[FileAs] LIKE '%{name}%' OR [FullName] LIKE '%{name}%'")
-                filter_string = " OR ".join(filter_conditions)
-                
-                matches = contacts_folder.Items.Restrict(filter_string)
-                
-                # Look through all matching contacts
-                for contact in matches:
-                    if not hasattr(contact, 'Email1Address') or not contact.Email1Address:
-                        continue
-                        
-                    # Calculate match score for this contact
-                    try:
-                        # Base score from usage frequency
-                        score = getattr(contact, 'ContactCount', 0)
-                        
-                        # Add recency bonus
-                        if hasattr(contact, 'LastModificationTime') and contact.LastModificationTime:
-                            days_since_used = (time.time() - time.mktime(contact.LastModificationTime.timetuple())) / (24 * 3600)
-                            if days_since_used < 30:  # Used in last month
-                                score += 10
-                            if days_since_used < 7:   # Used in last week
-                                score += 20
-                        
-                        # Add exact name match bonus
-                        contact_name = contact.FullName or contact.FileAs or ""
-                        for name in possible_names:
-                            if name.lower() == contact_name.lower():
-                                score += 50  # Big bonus for exact match
-                            elif name.lower() in contact_name.lower():
-                                score += 25  # Smaller bonus for partial match
-                        
+                MIN_MATCH_SCORE = 1
+
+                def get_match_score(contact_name, search_term):
+                    search_term = search_term.lower()
+                    contact_name = contact_name.lower()
+                    
+                    # Split names into parts
+                    search_parts = search_term.split()
+                    contact_parts = contact_name.split()
+                    
+                    # Exact match
+                    if contact_name == search_term:
+                        return 4
+                    
+                    # Check if all search parts are in contact name
+                    if all(part in contact_name for part in search_parts):
+                        return 3
+                    
+                    # Check for first name or last name exact matches
+                    if any(search_part == contact_part 
+                          for search_part in search_parts 
+                          for contact_part in contact_parts):
+                        return 2
+                    
+                    # Partial matches in any part
+                    if any(search_part in contact_part 
+                          for search_part in search_parts 
+                          for contact_part in contact_parts):
+                        return 1
+                    
+                    return 0
+
+                # 1. Search recent emails (more reliable than AutoComplete)
+                logger.debug("Searching recent emails...")
+                recent_contacts = {}
+                try:
+                    sent_items = self.namespace.GetDefaultFolder(5)  # Sent Items folder
+                    for item in sent_items.Items.Restrict("[SentOn] > '" + 
+                            (datetime.now() - timedelta(days=30)).strftime('%m/%d/%Y %H:%M %p') + "'"):
+                        if item.To:
+                            for recipient in item.To.split(';'):
+                                recipient = recipient.strip()
+                                if recipient and '@' in recipient:
+                                    recent_contacts[recipient] = recipient
+                except Exception as e:
+                    logger.warning(f"Failed to search recent emails: {str(e)}")
+
+                # 2. Search contacts folder
+                logger.debug("Searching contacts folder...")
+                contacts = {}
+                try:
+                    contacts_folder = self.namespace.GetDefaultFolder(10)
+                    for contact in contacts_folder.Items:
+                        if contact.Class == 40:  # OlObjectClass.olContact
+                            name = f"{contact.FirstName} {contact.LastName}".strip()
+                            if contact.Email1Address:
+                                contacts[name] = contact.Email1Address
+                except Exception as e:
+                    logger.warning(f"Failed to search contacts folder: {str(e)}")
+
+                # 3. Search Global Address List
+                logger.debug("Searching Global Address List...")
+                try:
+                    for list_name in self.namespace.AddressLists:
+                        if "Global Address List" in list_name.Name:
+                            gal = list_name
+                            for entry in gal.AddressEntries:
+                                try:
+                                    if entry.AddressEntryUserType == 0:
+                                        user = entry.GetExchangeUser()
+                                        if user:
+                                            name = user.Name
+                                            email = user.PrimarySmtpAddress
+                                            for possible in possible_names:
+                                                score = get_match_score(name, possible)
+                                                if score > best_score:
+                                                    best_score = score
+                                                    best_name = possible
+                                                    best_match = email
+                                except Exception as entry_error:
+                                    logger.debug(f"Skipping GAL entry due to error: {str(entry_error)}")
+                            break
+                except Exception as e:
+                    logger.warning(f"Failed to search GAL: {str(e)}")
+
+                # Combine and evaluate all results
+                combined = {**recent_contacts, **contacts}
+                for name, email in combined.items():
+                    for possible in possible_names:
+                        score = get_match_score(name, possible)
                         if score > best_score:
                             best_score = score
-                            best_match = contact.Email1Address
-                            best_name = contact_name
-                            
-                    except Exception as e:
-                        logger.debug(f"Error scoring contact {contact.FullName}: {str(e)}")
-                        # If we can't calculate score but haven't found any match yet
-                        if best_match is None:
-                            best_match = contact.Email1Address
-                            best_name = contact.FullName
-                
-                if best_match:
-                    logger.info(f"Found best matching email for names {possible_names}: {best_name} <{best_match}>")
-                else:
-                    logger.info(f"No matching email found for names {possible_names}")
-                
-                return (best_name, best_match) if best_match else (None, None)
-                
+                            best_name = possible
+                            best_match = email
+
+                # Return tuple as specified in the docstring
+                return f"The most likely email address of the recipient {possible_names} is: {best_match}" if best_match and best_score >= MIN_MATCH_SCORE else None
+
+
             except Exception as e:
-                logger.error(f"Failed to find email address: {str(e)}")
+                logger.error(f"Failed to find email: {str(e)}", exc_info=True)
                 raise ValueError(f"Email lookup failed: {str(e)}")
+
+     
