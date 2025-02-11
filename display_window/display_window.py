@@ -1,164 +1,142 @@
 """
-Enhanced display window with modern UI and taskbar integration using PyQt6.
+Enhanced display window with markdown support using Tkinter and tkhtmlview.
 """
 
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
-                           QHBoxLayout, QPushButton, QLabel, 
-                           QTextEdit, QApplication)
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtGui import QIcon
-import os
+import tkinter as tk
+from tkinter import ttk
+from tkhtmlview import HTMLLabel
+import markdown
 from typing import Optional
+import os
 
-class DisplayWindow(QMainWindow):
+class DisplayWindow(tk.Toplevel):
     def __init__(self):
         super().__init__()
         self._setup_ui()
         
     def _setup_ui(self):
-        self.setWindowTitle("Message Display")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # Configure window
+        self.title("Message Display")
+        self.overrideredirect(True)  # Frameless window
         
-        # Set window icon
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            icon_path = os.path.join(script_dir, '..', 'assets', 'icon.ico')
-            if os.path.exists(icon_path):
-                self.setWindowIcon(QIcon(icon_path))
-        except Exception:
-            pass
-
-        # Create central widget and main layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(1, 1, 1, 1)  # 减小边框间距
-        layout.setSpacing(0)  # 移除组件之间的间距
+        # Create title bar
+        title_bar = ttk.Frame(self, style='Title.TFrame')
+        title_bar.pack(fill='x', side='top')
         
-        # Title bar - 减小高度，调整背景色
-        title_bar = QWidget()
-        title_bar.setStyleSheet("background-color: #2c3e50;")
-        title_bar.setFixedHeight(24)  # 减小标题栏高度
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(8, 0, 0, 0)
+        # Title label
+        title_label = ttk.Label(title_bar, text="Message Content", style='Title.TLabel')
+        title_label.pack(side='left', padx=10)
         
-        # Title label - 调整字体大小
-        title_label = QLabel("Message Content")
-        title_label.setStyleSheet("color: white; font-family: 'Segoe UI'; font-size: 9pt;")
+        # Close button
+        close_btn = ttk.Button(title_bar, text="×", style='Close.TButton', 
+                              command=self.destroy, width=3)
+        close_btn.pack(side='right')
         
-        # 调整按钮样式
-        minimize_button = QPushButton("−")
-        minimize_button.setFixedWidth(24)  # 减小按钮宽度
-        minimize_button.clicked.connect(self.showMinimized)
-        minimize_button.setStyleSheet("""
-            QPushButton {
-                color: white;
-                border: none;
-                font-family: 'Segoe UI';
-                font-size: 11pt;
-                font-weight: bold;
-                background-color: #2c3e50;
-            }
-            QPushButton:hover {
-                background-color: #34495e;
-            }
-        """)
+        # Minimize button
+        min_btn = ttk.Button(title_bar, text="−", style='Min.TButton',
+                            command=self.iconify, width=3)
+        min_btn.pack(side='right')
         
-        close_button = QPushButton("×")
-        close_button.setFixedWidth(24)  # 减小按钮宽度
-        close_button.clicked.connect(self.hide)
-        close_button.setStyleSheet("""
-            QPushButton {
-                color: white;
-                border: none;
-                font-family: 'Segoe UI';
-                font-size: 11pt;
-                font-weight: bold;
-                background-color: #2c3e50;
-            }
-            QPushButton:hover {
-                background-color: #e74c3c;
-            }
-        """)
+        # Content area
+        self.content = HTMLLabel(self, background='#ffffff', 
+                               html='<body style="font-size: 12pt;"></body>')
+        self.content.pack(fill='both', expand=True, padx=10, pady=10)
         
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        title_layout.addWidget(minimize_button)
-        title_layout.addWidget(close_button)
-        
-        # Text widget - 更新样式
-        self.text_widget = QTextEdit()
-        self.text_widget.setReadOnly(True)
-        self.text_widget.setStyleSheet("""
-            QTextEdit {
-                background-color: #f5f6f7;
-                color: #2c3e50;
-                border: none;
-                font-family: 'Segoe UI', 'Microsoft YaHei';
-                font-size: 10.5pt;
-                line-height: 1.6;
-                padding: 12px;
-            }
-        """)
-        
-        layout.addWidget(title_bar)
-        layout.addWidget(self.text_widget)
+        # Configure styles
+        style = ttk.Style()
+        style.configure('Title.TFrame', background='#2c3e50')
+        style.configure('Title.TLabel', 
+                       background='#2c3e50',
+                       foreground='white',
+                       font=('Segoe UI', 11))
+        style.configure('Close.TButton', 
+                       font=('Segoe UI', 11, 'bold'))
+        style.configure('Min.TButton', 
+                       font=('Segoe UI', 11, 'bold'))
         
         # Make window draggable
-        self._drag_pos = None
-        title_bar.mousePressEvent = self._start_move
-        title_bar.mouseMoveEvent = self._do_move
+        title_bar.bind('<Button-1>', self._start_move)
+        title_bar.bind('<B1-Motion>', self._do_move)
         
-        # 为窗口添加边框样式
-        self.setStyleSheet("""
-            QMainWindow {
-                border: 1px solid #2c3e50;
-                background-color: #f5f6f7;
-            }
-        """)
+        # Add border
+        self.configure(background='#2c3e50')
         
     def _start_move(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint()
-            
+        self._drag_x = event.x
+        self._drag_y = event.y
+        
     def _do_move(self, event):
-        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos:
-            new_pos = event.globalPosition().toPoint()
-            self.move(self.pos() + new_pos - self._drag_pos)
-            self._drag_pos = new_pos
-            
+        x = self.winfo_x() + (event.x - self._drag_x)
+        y = self.winfo_y() + (event.y - self._drag_y)
+        self.geometry(f"+{x}+{y}")
+        
     def show_content(self, content: str):
-        """Display content in the window"""
-        # Set window size
-        width = min(max(len(content) * 7, 400), 800)
-        height = min((content.count('\n') + 1) * 20 + 100, 600)
-        self.resize(width, height)
+        """Display markdown content in the window"""
+        # Convert markdown to HTML
+        html = markdown.markdown(content)
+        html = f'''
+        <body style="
+            font-family: 'SF Pro Display', 'Segoe UI', 'Microsoft YaHei UI', Arial, sans-serif;
+            font-size: 8pt;
+            line-height: 1.5;
+            color: #333333;
+            padding: 15px;
+            letter-spacing: 0.2px;
+        ">
+        {html}
+        </body>
+        '''
+        
+        # Update the window first to calculate required size
+        self.content.set_html(html)
+        self.update_idletasks()
+        
+        # Get the required height for all content
+        required_height = self.content.winfo_reqheight() + 50  # Add padding for title bar
+        
+        # Calculate width based on content
+        max_line_length = max(len(line) for line in content.split('\n'))
+        width = min(max(max_line_length * 7, 400), 1000)
+        
+        # Calculate height ensuring all content is visible
+        height = min(required_height, self.winfo_screenheight() - 100)  # Leave some screen margin
         
         # Center window
-        screen = QApplication.primaryScreen().geometry()
-        self.move(
-            (screen.width() - width) // 2,
-            (screen.height() - height) // 2
-        )
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
         
-        # Set content
-        self.text_widget.setText(content)
+        # Set window geometry
+        self.geometry(f"{width}x{height}+{x}+{y}")
         
         # Copy to clipboard
-        QApplication.clipboard().setText(content)
+        self.clipboard_clear()
+        self.clipboard_append(content)
         
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+_current_window: Optional[DisplayWindow] = None
 
 def display_content(content: str):
     """Display content in a popup window."""
     global _current_window
     
-    if '_current_window' in globals() and _current_window is not None:
-        _current_window.close()
-        _current_window = None
+    if _current_window is not None:
+        _current_window.destroy()
+    
+    root = tk.Tk()  # Create root window
+    root.withdraw()  # Hide the root window
     
     _current_window = DisplayWindow()
     _current_window.show_content(content)
+    
+    # Start the Tkinter event loop if not already running
+    try:
+        _current_window.mainloop()
+    except:
+        pass  # Window was closed
+    
     return _current_window 

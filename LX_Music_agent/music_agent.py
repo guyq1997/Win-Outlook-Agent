@@ -3,19 +3,13 @@ LLM Agent for email recipient analysis and resolution using OpenAI's API.
 """
 
 from typing import List, Optional
-import openai
 from loguru import logger
-from pydantic import BaseModel, EmailStr, Field
-from email_service.outlook_service import OutlookService
 import json
 import asyncio
-from prompt import PROMPTS
 from openai import OpenAI
 import os
-from email_service.outlook_agent import run_outlook_agent
-from display_window.display_window import display_content
 from .lx_music_controller import LXMusicController
-
+from search_tool.search_with_retry import search
 
 class MusicAgent:
     def __init__(self):
@@ -90,14 +84,39 @@ class MusicAgent:
                         "required": ["song_name"]
                     }
                 }
-            }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_song_info",
+                    "description": "Search the internet for information about the song",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "content for searching the song name and singer name"},
+                            "max_results": {"type": "integer", "description": "Maximum number of results to return (use 3 as default)"},
+                            "max_retries": {"type": "integer", "description": "Maximum number of retry attempts (use 3 as default)"}
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }   
+            
         ]
 
 
 
 
         messages = [
-            {"role": "system", "content": "You are a music agent, you can play, pause, next track, previous track, search and play music."},
+            {"role": "system", "content": """You are a music agent, you can manipulate the music player. You are also able to search the internet for information about the song.
+             While using search_song_info tool, pass the query information as detailed as possible. 
+             Always consider the user's input and the context of the conversation, then decide what to do next. 
+             You should use search_song_info tool to make sure the song name you are going to play is correct, before you play the song. 
+             Notice that you can not ask user questions, you have to decide by yourself. 
+             Only use chinese and english while using the search_and_play tool. 
+             Only use the singer name parameter in search_and_play tool, if you are very sure about that.
+             """,
+            },
             {"role": "user", "content": user_input}
         ]
 
@@ -113,19 +132,40 @@ class MusicAgent:
 
 
             message = response.choices[0].message
+            messages.append(message)
 
-            if message.tool_calls:
+            count = 0
+            while count < 3 and message.tool_calls:
                 for tool_call in message.tool_calls:
                     try:
+
                         name = tool_call.function.name
                         args = tool_call.function.arguments
+
                         logger.info(f"Calling tool {name} with arguments: {args}")
                         tool_result = await self.call_function(name, args)
                         logger.info(f"Tool {name} returned: {tool_result}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": str(tool_result)
+                        })
 
                     except Exception as e:
                         logger.error(f"Error in tool call {name}: {str(e)}")
                         raise
+                    
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto"
+                )
+
+                message = response.choices[0].message
+                logger.info(f"Message: {message}")
+                messages.append(message)
+                count += 1
 
             return None
 
@@ -158,7 +198,8 @@ class MusicAgent:
                 "pause": self.music_controller.pause,
                 "next_track": self.music_controller.next_track,
                 "previous_track": self.music_controller.previous_track,
-                "search_and_play": self.music_controller.search_and_play
+                "search_and_play": self.music_controller.search_and_play,
+                "search_song_info": search
             }
             
 

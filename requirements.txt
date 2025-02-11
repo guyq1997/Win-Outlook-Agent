@@ -17,3 +17,6 @@ keyboard
 websockets
 pyinstaller
 psutil
+duckduckgo_search
+markdown 
+tkhtmlview

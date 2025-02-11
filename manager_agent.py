@@ -3,19 +3,15 @@ LLM Agent for email recipient analysis and resolution using OpenAI's API.
 """
 
 from typing import List, Optional
-import openai
 from loguru import logger
-from pydantic import BaseModel, EmailStr, Field
-from email_service.outlook_service import OutlookService
 import json
 import asyncio
 from prompt import PROMPTS
 from openai import OpenAI
 import os
 from email_service.outlook_agent import run_outlook_agent
-from display_window.display_window import display_content
 from LX_Music_agent.music_agent import MusicAgent
-
+from readability_agent.readability_agent import run_readability_agent
 
 
 
@@ -23,28 +19,12 @@ class ManagerAgent:
     def __init__(self):
         """Initialize the agent with OpenAI API key."""
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.outlook_service = OutlookService()
 
 
 
     async def run(self, user_input: str) -> str:
         """Run the agent with user input and return response."""
         tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "display_content",
-                    "description": "Display content to the user",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "content": {"type": "string", "description": "Content to display"},
-                        },
-                        "required": ["content"]
-                    }
-
-                }
-            },
             {
                 "type": "function",
                 "function": {
@@ -68,6 +48,20 @@ class ManagerAgent:
                         "type": "object",
                         "properties": {
                             "user_input": {"type": "string", "description": "User input for music control"}
+                        },
+                        "required": ["user_input"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_readability_agent",
+                    "description": "Invoke the readability agent to improve the readability of the user input text.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_input": {"type": "string", "description": "User input"}
                         },
                         "required": ["user_input"]
                     }
@@ -134,9 +128,9 @@ class ManagerAgent:
         try:
             # Map function names to their implementations
             function_map = {
-                "display_content": display_content,
                 "run_outlook_agent": run_outlook_agent,
-                "run_music_agent": MusicAgent().run
+                "run_music_agent": MusicAgent().run,
+                "run_readability_agent": run_readability_agent
             }
             
 

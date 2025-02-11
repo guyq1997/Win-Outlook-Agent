@@ -85,7 +85,7 @@ class LXMusicController:
                 return False
             
             # 等待一小段时间确保应用完全启动
-            time.sleep(0.5)
+            # time.sleep(0.5)
             webbrowser.open(url)
             logger.debug(f"Opened URL: {url}")
             return True

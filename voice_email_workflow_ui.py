@@ -48,7 +48,7 @@ class VoiceEmailUI(QMainWindow):
             QPushButton {
                 background-color: #FF4444;
                 color: white;
-                border-radius: 10px;
+                border-radius: 8px;
                 border: none;
                 font-weight: bold;
             }
