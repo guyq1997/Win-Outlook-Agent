@@ -17,58 +17,18 @@ class DisplayWindow(tk.Toplevel):
     def _setup_ui(self):
         # Configure window
         self.title("Message Display")
-        self.overrideredirect(True)  # Frameless window
+        self.overrideredirect(False)  # Use system window decorations
         
-        # Create title bar
-        title_bar = ttk.Frame(self, style='Title.TFrame')
-        title_bar.pack(fill='x', side='top')
-        
-        # Title label
-        title_label = ttk.Label(title_bar, text="Message Content", style='Title.TLabel')
-        title_label.pack(side='left', padx=10)
-        
-        # Close button
-        close_btn = ttk.Button(title_bar, text="×", style='Close.TButton', 
-                              command=self.destroy, width=3)
-        close_btn.pack(side='right')
-        
-        # Minimize button
-        min_btn = ttk.Button(title_bar, text="−", style='Min.TButton',
-                            command=self.iconify, width=3)
-        min_btn.pack(side='right')
-        
-        # Content area
+        # Content area only
         self.content = HTMLLabel(self, background='#ffffff', 
-                               html='<body style="font-size: 12pt;"></body>')
-        self.content.pack(fill='both', expand=True, padx=10, pady=10)
+                               html='<body style="font-size: 10.5pt;"></body>')
+        self.content.pack(fill='both', expand=True)
         
-        # Configure styles
-        style = ttk.Style()
-        style.configure('Title.TFrame', background='#2c3e50')
-        style.configure('Title.TLabel', 
-                       background='#2c3e50',
-                       foreground='white',
-                       font=('Segoe UI', 11))
-        style.configure('Close.TButton', 
-                       font=('Segoe UI', 11, 'bold'))
-        style.configure('Min.TButton', 
-                       font=('Segoe UI', 11, 'bold'))
+        # Configure window appearance
+        self.configure(background='#ffffff')
         
-        # Make window draggable
-        title_bar.bind('<Button-1>', self._start_move)
-        title_bar.bind('<B1-Motion>', self._do_move)
-        
-        # Add border
-        self.configure(background='#2c3e50')
-        
-    def _start_move(self, event):
-        self._drag_x = event.x
-        self._drag_y = event.y
-        
-    def _do_move(self, event):
-        x = self.winfo_x() + (event.x - self._drag_x)
-        y = self.winfo_y() + (event.y - self._drag_y)
-        self.geometry(f"+{x}+{y}")
+        # Remove window decorations after a short delay
+        self.after(10, lambda: self.attributes('-toolwindow', True))
         
     def show_content(self, content: str):
         """Display markdown content in the window"""
@@ -77,10 +37,10 @@ class DisplayWindow(tk.Toplevel):
         html = f'''
         <body style="
             font-family: 'SF Pro Display', 'Segoe UI', 'Microsoft YaHei UI', Arial, sans-serif;
-            font-size: 8pt;
+            font-size: 10.5pt;
             line-height: 1.5;
             color: #333333;
-            padding: 15px;
+            padding: 5px;
             letter-spacing: 0.2px;
         ">
         {html}
