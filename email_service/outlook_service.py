@@ -112,9 +112,8 @@ class OutlookService:
                 entry_id = mail_item.EntryID
                 logger.debug(f"Draft saved with Entry ID: {entry_id}")
                 
-                # Single window display operation
-                logger.debug("Displaying mail item")
-                mail_item.Display(True)  # True parameter forces the window to the front
+                # Display mail item asynchronously
+                asyncio.create_task(self._display_mail_item(mail_item))
                 
                 return entry_id
 
@@ -122,6 +121,13 @@ class OutlookService:
                 logger.error(f"Failed to create email draft: {str(e)}", exc_info=True)
                 raise ValueError(f"Draft creation failed: {str(e)}")
             
+    async def _display_mail_item(self, mail_item):
+        """Display the mail item in a non-blocking way."""
+        try:
+            logger.debug("Displaying mail item")
+            mail_item.Display(False)  # False parameter to avoid blocking
+        except Exception as e:
+            logger.error(f"Failed to display mail item: {str(e)}", exc_info=True)
             
     async def cleanup(self):
         """Release COM resources and uninitialize COM for the current thread."""

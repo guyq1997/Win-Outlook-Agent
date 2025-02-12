@@ -7,7 +7,7 @@ from typing import Optional
 import sys
 from loguru import logger
 from PyQt6.QtWidgets import QApplication, QMainWindow, QTextBrowser
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QClipboard
 
 class ContentWindow(QMainWindow):
@@ -15,26 +15,15 @@ class ContentWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Content Display")
         
-        # Calculate window size based on content
-        content_length = len(content)
-        width = min(1600, max(1200, content_length * 2))  # Between 1200 and 1600 pixels
-        height = min(900, max(600, content_length))       # Between 600 and 900 pixels
-        
-        # Center the window on screen
-        screen = QApplication.primaryScreen().geometry()
-        x = (screen.width() - width) // 2
-        y = (screen.height() - height) // 2
-        self.setGeometry(x, y, width, height)
-        
+        # Initialize browser first
         self.browser = QTextBrowser(self)
         self.browser.setOpenExternalLinks(True)
         
-        # 设置更好看的字体
-        font = QFont('Segoe UI', 12)  # Windows 默认的现代字体
-        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)  # 启用抗锯齿
+        # Set font and style before content
+        font = QFont('Segoe UI', 12)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         self.browser.setFont(font)
         
-        # 设置文本浏览器的样式
         self.browser.setStyleSheet("""
             QTextBrowser {
                 background-color: #FFFFFF;
@@ -47,11 +36,22 @@ class ContentWindow(QMainWindow):
         
         self.setCentralWidget(self.browser)
         
-        # Store original content for clipboard
+        # Store original content and set text
         self.original_content = content
-        
-        # Set plain text instead of HTML
         self.browser.setPlainText(content)
+        
+        # Calculate and set window size based on content
+        self.adjustSize()
+        document_size = self.browser.document().size()
+        width = min(1600, max(800, document_size.width() + 60))  # Add padding
+        height = min(900, max(200, document_size.height() + 60))  # Add padding
+        
+        # Center the window on screen
+        screen = QApplication.primaryScreen().geometry()
+        x = (screen.width() - width) // 2
+        y = (screen.height() - height) // 2
+        self.setGeometry(x, y, width, height)
+        
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         
         # Copy to clipboard
@@ -104,8 +104,8 @@ def display_content(content: str):
         if _window_manager is None:
             _window_manager = WindowManager()
         
-        # Show window with content
-        _window_manager.show_window.emit(content)
+        # Emit signal to show window with content asynchronously
+        QTimer.singleShot(0, lambda: _window_manager.show_window.emit(content))
             
     except Exception as e:
         logger.error(f"Error displaying content: {str(e)}")
