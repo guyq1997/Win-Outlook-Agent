@@ -1,102 +1,112 @@
 """
-Enhanced display window with markdown support using Tkinter and tkhtmlview.
+Enhanced display window with markdown support.
 """
 
-import tkinter as tk
-from tkinter import ttk
-from tkhtmlview import HTMLLabel
 import markdown
 from typing import Optional
-import os
+import sys
+from loguru import logger
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTextBrowser
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtGui import QFont, QClipboard
 
-class DisplayWindow(tk.Toplevel):
-    def __init__(self):
+class ContentWindow(QMainWindow):
+    def __init__(self, content: str):
         super().__init__()
-        self._setup_ui()
+        self.setWindowTitle("Content Display")
         
-    def _setup_ui(self):
-        # Configure window
-        self.title("Message Display")
-        self.overrideredirect(False)  # Use system window decorations
+        # Calculate window size based on content
+        content_length = len(content)
+        width = min(1600, max(1200, content_length * 2))  # Between 1200 and 1600 pixels
+        height = min(900, max(600, content_length))       # Between 600 and 900 pixels
         
-        # Content area only
-        self.content = HTMLLabel(self, background='#ffffff', 
-                               html='<body style="font-size: 10.5pt;"></body>')
-        self.content.pack(fill='both', expand=True)
+        # Center the window on screen
+        screen = QApplication.primaryScreen().geometry()
+        x = (screen.width() - width) // 2
+        y = (screen.height() - height) // 2
+        self.setGeometry(x, y, width, height)
         
-        # Configure window appearance
-        self.configure(background='#ffffff')
+        self.browser = QTextBrowser(self)
+        self.browser.setOpenExternalLinks(True)
         
-        # Remove window decorations after a short delay
-        self.after(10, lambda: self.attributes('-toolwindow', True))
+        # 设置更好看的字体
+        font = QFont('Segoe UI', 12)  # Windows 默认的现代字体
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)  # 启用抗锯齿
+        self.browser.setFont(font)
         
-    def show_content(self, content: str):
-        """Display markdown content in the window"""
-        # Convert markdown to HTML
-        html = markdown.markdown(content)
-        html = f'''
-        <body style="
-            font-family: 'SF Pro Display', 'Segoe UI', 'Microsoft YaHei UI', Arial, sans-serif;
-            font-size: 10.5pt;
-            line-height: 1.5;
-            color: #333333;
-            padding: 5px;
-            letter-spacing: 0.2px;
-        ">
-        {html}
-        </body>
-        '''
+        # 设置文本浏览器的样式
+        self.browser.setStyleSheet("""
+            QTextBrowser {
+                background-color: #FFFFFF;
+                color: #2C3E50;
+                border: none;
+                padding: 20px;
+                line-height: 1.6;
+            }
+        """)
         
-        # Update the window first to calculate required size
-        self.content.set_html(html)
-        self.update_idletasks()
+        self.setCentralWidget(self.browser)
         
-        # Get the required height for all content
-        required_height = self.content.winfo_reqheight() + 50  # Add padding for title bar
+        # Store original content for clipboard
+        self.original_content = content
         
-        # Calculate width based on content
-        max_line_length = max(len(line) for line in content.split('\n'))
-        width = min(max(max_line_length * 7, 400), 1000)
-        
-        # Calculate height ensuring all content is visible
-        height = min(required_height, self.winfo_screenheight() - 100)  # Leave some screen margin
-        
-        # Center window
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
-        
-        # Set window geometry
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        # Set plain text instead of HTML
+        self.browser.setPlainText(content)
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         
         # Copy to clipboard
-        self.clipboard_clear()
-        self.clipboard_append(content)
-        
-        self.deiconify()
-        self.lift()
-        self.focus_force()
+        self._copy_to_clipboard()
+    
+    def _copy_to_clipboard(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.original_content)
+        # Also copy to selection clipboard (for Linux middle-click paste)
+        clipboard.setText(self.original_content, QClipboard.Mode.Selection)
+    
+    def closeEvent(self, event):
+        # Hide the window instead of closing it
+        self.hide()
+        event.ignore()
 
-_current_window: Optional[DisplayWindow] = None
+class WindowManager(QObject):
+    show_window = pyqtSignal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.window = None
+        self.show_window.connect(self._create_window)
+    
+    def _create_window(self, content: str):
+        if self.window is None:
+            self.window = ContentWindow(content)
+        else:
+            # Update content if window already exists
+            self.window.original_content = content
+            self.window.browser.setPlainText(content)
+            self.window._copy_to_clipboard()
+        self.window.show()
+
+_window_manager: Optional[WindowManager] = None
+_app: Optional[QApplication] = None
 
 def display_content(content: str):
-    """Display content in a popup window."""
-    global _current_window
-    
-    if _current_window is not None:
-        _current_window.destroy()
-    
-    root = tk.Tk()  # Create root window
-    root.withdraw()  # Hide the root window
-    
-    _current_window = DisplayWindow()
-    _current_window.show_content(content)
-    
-    # Start the Tkinter event loop if not already running
+    """Display content in a popup window and copy to clipboard."""
     try:
-        _current_window.mainloop()
-    except:
-        pass  # Window was closed
-    
-    return _current_window 
+        global _window_manager, _app
+        
+        # Create or get QApplication instance
+        if QApplication.instance() is None:
+            _app = QApplication(sys.argv)
+            # Prevent Qt from exiting when last window is closed
+            _app.setQuitOnLastWindowClosed(False)
+        
+        # Create window manager if it doesn't exist
+        if _window_manager is None:
+            _window_manager = WindowManager()
+        
+        # Show window with content
+        _window_manager.show_window.emit(content)
+            
+    except Exception as e:
+        logger.error(f"Error displaying content: {str(e)}")
+        raise
